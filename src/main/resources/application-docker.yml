@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: jdbc:mysql://db:3306/taskflow
+    username: taskflow
+    password: taskflow
