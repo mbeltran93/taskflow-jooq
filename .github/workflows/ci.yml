@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    name: Build + tests (unit e integracion con MySQL real)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+
+      - name: mvn verify
+        # Corre los tests unitarios (surefire) y los de integracion *IT (failsafe), que levantan
+        # un MySQL real con Testcontainers. En un runner de GitHub Actions (Linux) Testcontainers
+        # habla con el docker.sock nativo sin problema; esto es justamente lo que en Windows +
+        # Docker Desktop no funciona (ver README), asi que este job es la verificacion real de
+        # esos tests.
+        run: mvn -B verify
+
+  jooq-codegen-check:
+    name: Verifica que el codegen de jOOQ no diverge del commiteado
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: codegen
+          MYSQL_DATABASE: taskflow_codegen
+        ports:
+          - "3310:3306"
+        options: >-
+          --health-cmd "mysqladmin ping -uroot -pcodegen --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+
+      - name: Flyway migrate contra el MySQL del job
+        run: mvn -B -q -P jooq-codegen -Dcodegen.db.port=3310 flyway:migrate
+
+      - name: Regenerar las clases de jOOQ
+        run: mvn -B -q -P jooq-codegen -Dcodegen.db.port=3310 generate-sources
+
+      - name: Falla si el codegen difiere de lo commiteado
+        # Si esto falla, alguien cambio una migracion de Flyway sin correr
+        # scripts/regenerate-jooq.* y commitear las clases nuevas.
+        run: git diff --exit-code -- src/main/java/com/taskflow/jooq/generated
+
+  docker-build:
+    name: Build de la imagen Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker build -t taskflow-jooq:ci .
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java
+
+      - name: Build (sin tests, el codigo generado ya esta commiteado)
+        run: mvn -B -q -DskipTests package
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
