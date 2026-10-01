@@ -28,7 +28,11 @@ import static com.taskflow.jooq.generated.Tables.USERS;
  * CI (GitHub Actions, Linux) se ejecutan de verdad.
  */
 @Testcontainers
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+// webEnvironment MOCK (el default): estos tests solo necesitan el DSLContext, pero con NONE
+// Spring Boot excluye la autoconfiguracion de servlet y SecurityConfig.filterChain(HttpSecurity)
+// no encuentra el bean HttpSecurity (lo registra HttpSecurityConfiguration, condicionado a un
+// ApplicationContext de tipo SERVLET). MOCK carga ese contexto sin levantar un puerto real.
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @ActiveProfiles("test")
 public abstract class AbstractRepositoryIT {
 
